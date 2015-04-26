@@ -1,0 +1,147 @@
+---
+title: "ML Project"
+author: "Jonah L"
+date: "April 25, 2015"
+output: html_document
+---
+##Overview
+This document describes the machine learning algorithm that we used to predict the 'classe' variable for the 'pml-testing' data set from the 'pml-training' data set. We first divided the training set into 6 subsets, one for each person who was doing the exercises. We then fit separate random forest models to each of the 6 subsets. We used the appropriate random forest model for each line of our testing data (i.e. to predict the classe of an observation in the test set that has user_name=Carlitos, we used the random forest model from the carlitos training set). Below are the details of how we did everything.
+
+##Procedure
+The first thing we did was clean the original 'pml-raining.csv' data set. Every column had either mostly bad (NA or empty) values or no bad values, and we removed those columns that had mostly bad values. All columns with mostly bad values had good (i.e. not bad) values in the same rows. Not trusting the values in these rows, we removed them. Lastly, we removed columns that did not have relevant data. We were left with a data set that we called 'tr5'.
+```{r,echo=FALSE}
+#This code reads in the files
+tr<-read.csv('pml-training.csv')
+te<-read.csv('pml-testing.csv')
+
+#We now remove the bad rows and columns:
+N<-NULL
+for(i in 1:160){N[i]<-sum(is.na(tr[,i]))}
+
+#Some (67) columns have 19216, some (93) have 0. 
+
+M<-matrix(nrow=nrow(tr),ncol=160)
+for(i in 1:160){M[,i]<-is.na(tr[,i])}
+
+T<-NULL
+for(i in 1:nrow(M)){T[i]<-sum(M[i,])}
+
+bad<-which(T==0)
+
+#And 19216 rows have 67 NA values, 406 have 0. These 406 rows are the bad ones.
+
+
+E<-NULL
+for(i in 1:160){E[i]<-sum(tr[,i]=="")}
+#Of the 93 non-NA columns, 60 have no blanks, 33 have 19216 blanks
+
+F<-matrix(nrow=nrow(tr),ncol=160)
+for(i in 1:160){F[,i]<-tr[,i]==""}
+
+G<-NULL
+for(i in 1:nrow(F)){G[i]<-sum(F[i,],na.rm=TRUE)}
+
+#We see that 406 rows have no NA's, 19216 do. Are these the same bad rows as before?
+
+#which(G==0)==which(T==0) tells us that the answer is yes, so should remove these rows and columns
+
+#Remove the bad rows:
+tr2<-tr[-which(T==0),]
+
+s<-NULL
+for(i in 1:160){s[i]<-sum(F[,i])}
+
+t<-NULL
+for(i in 1:160){t[i]<-sum(M[,i])}
+
+#Remove bad columns:
+tr4<-tr2[,-c(which(t==19216),which(s==19216))]
+
+#Before going further, we should check the test set to see where its bad values are:
+
+MTest<-matrix(nrow=nrow(te),ncol=160)
+for(i in 1:160){MTest[,i]<-is.na(te[,i])}
+
+tTest<-NULL
+for(i in 1:160){tTest[i]<-sum(MTest[,i])}
+#For testing set, 60 cols have no NA's and these are the same 60 columns as the good columns for the training data.
+
+
+#We eliminate further columns that do not contain what we deem to be relevant data for predicting the correct classe.
+tr5<-tr4[,-c(3:7)]
+```
+
+We next made the analogous column cuts to the testing data (the testing data had no bad rows, thankfully), and we are left with the cleaned test data set that we called 'te3'.
+```{r,echo=FALSE}
+te2<-te[,-c(which(t==19216),which(s==19216))]
+te3<-te2[,-c(3:7)]
+```
+
+We now subset the training and testing data: 
+
+```{r, echo=TRUE}
+BigCa<-tr5[tr5$user_name=='carlitos',]
+BigPe<-tr5[tr5$user_name=='pedro',]
+BigAd<-tr5[tr5$user_name=='adelmo',]
+BigCh<-tr5[tr5$user_name=='charles',]
+BigEu<-tr5[tr5$user_name=='eurico',]
+BigJe<-tr5[tr5$user_name=='jeremy',]
+
+carlitosTe<-te3[te3$user_name=='carlitos',]
+pedroTe<-te3[te3$user_name=='pedro',]
+adelmoTe<-te3[te3$user_name=='adelmo',]
+charlesTe<-te3[te3$user_name=='charles',]
+euricoTe<-te3[te3$user_name=='eurico',]
+jeremyTe<-te3[te3$user_name=='jeremy',]
+```
+
+We worked with each of these pairs of training and test sets separately. From hereon, we describe what we did with the training set 'BigCa' and the corresponding test set 'carlitosTe'. We repeated the exact same procedure for the remaining five pairs of training and test sets. 
+
+We removed the 'X' and 'user_name' columns from BigCa so that we are left with a data table that contains all the variables that we want to use to predict the classe variable from. We wanted to use as much relevant data as possible to make our predictions, so we used all variables that were physical measurements. The irrelevant data were variables that had to do with the time that the physical measurements were taken. 
+```{r}
+BigCaRf<-BigCa[,-c(1,2)]
+```
+We now use randomForest on BigCa to predict the classe. In order to test our method and estimate our out of sample error, we do a 3-fold cross validation. Since our columns do not appear to be normalized in any way, we thought it might be best to first preprocess the data using the 'pca' method; however, we found that running random forest on this preprocessed data led to slightly less accuracy. This is because random forest does its own preprocessing, which worked out better when applied to the original data than to the preprocessed data (although I'm not sure why that was the case). In any event, we chose to use the random forest method with no additional preprocessing:
+
+
+```{r,echo=FALSE}
+library(caret)
+```
+
+```{r}
+CaFold<-createFolds(BigCaRf$classe,k=3)
+
+modelFit1<-train(classe~.,method='rf',data=BigCaRf[c(CaFold$Fold2,CaFold$Fold3),]) 
+pred1<-predict(modelFit1,BigCaRf[c(CaFold$Fold1),]) 
+confusionMatrix(pred1, BigCaRf[c(CaFold$Fold1),]$classe)
+
+modelFit2<-train(classe~.,method='rf',data=BigCaRf[c(CaFold$Fold1,CaFold$Fold3),]) 
+pred2<-predict(modelFit2,BigCaRf[c(CaFold$Fold2),]) 
+confusionMatrix(pred2, BigCaRf[c(CaFold$Fold2),]$classe)
+
+modelFit3<-train(classe~.,method='rf',data=BigCaRf[c(CaFold$Fold1,CaFold$Fold2),]) 
+pred3<-predict(modelFit3,BigCaRf[c(CaFold$Fold3),]) 
+confusionMatrix(pred3, BigCaRf[c(CaFold$Fold3),]$classe)
+```
+
+We estimate that our out of sample error rate will be the mean of the error rates (1 minus Accuracy) in the 3 cross validations we have done, which is less than 1%.
+
+The final model that we will use to predict the classe variable from the test set will make use of all the data in the training set:
+
+```{r}
+modelFitCa<-train(classe~.,method='rf',data=BigCaRf)
+```
+
+##A Final Thought
+Because our accuracy was so good with the random forest method, we don't need to try another one. For fun though, we can consider another way we could have gone about predicting the classe variable for the testing set; we can look at k-nearest neighbors. 
+
+We first normalize the columns of our data set so that they each sum to 1 and call this data set 'new.' We test the knn method by looking at the 80 nearest neighbors of each of the first 10 rows of the BigCaRf data set, where neighbors are chosen from all the remaining rows of the data set. These first 10 rows are all in classe A, and we see that knn correctly predicts this:
+
+```{r,echo=FALSE}
+library(class)
+```
+
+```{r}
+new<-apply(BigCaRf[,1:52],2,norm<-function(x){return (x/sum(x))})
+knn(new[11:nrow(new),],new[1:10,],BigCaRf$classe[11:nrow(new)],k=80,prob=TRUE) 
+```
